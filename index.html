@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>書画カメラ・シンプル版</title>
+    <title>書画カメラ・フルサイズ版</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         body { 
@@ -17,7 +17,7 @@
             overflow: hidden; 
         }
 
-        /* 映像エリア：カメラ画像を100%収める設定 */
+        /* 映像エリア：回転しても画面いっぱいに広がるようにする */
         .video-container {
             flex: 1;
             position: relative;
@@ -29,23 +29,23 @@
         }
 
         video { 
-            max-width: 100%; 
-            max-height: 100%; 
-            /* object-fit: contain により、切り取られずに全体が表示されます */
-            object-fit: contain; 
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            object-fit: contain; /* 切り取らずに全体を表示 */
             transition: transform 0.3s ease;
         }
 
-        /* 操作パネル：ボタンを3つに絞り、高さを最適化 */
+        /* 操作パネル：ボタンを3つ横並び */
         .controls { 
-            height: 120px; 
+            height: 100px; 
             background: #222; 
             display: grid; 
             grid-template-columns: repeat(3, 1fr); 
-            gap: 15px; 
-            padding: 15px;
+            gap: 10px; 
+            padding: 10px;
             box-sizing: border-box;
-            border-top: 1px solid #444;
+            border-top: 2px solid #444;
         }
 
         button { 
@@ -61,12 +61,12 @@
             justify-content: center;
         }
 
-        button:active { opacity: 0.8; }
+        button:active { opacity: 0.7; }
         .btn-pc { background: #0066ff; }
         .btn-sm { background: #28a745; }
         .btn-rot { background: #555; }
         
-        .icon { font-size: 24px; margin-bottom: 5px; }
+        .icon { font-size: 22px; margin-bottom: 4px; }
     </style>
 </head>
 <body>
@@ -100,7 +100,10 @@
             peer.on('call', call => {
                 call.answer();
                 call.on('stream', stream => {
-                    document.getElementById('videoView').srcObject = stream;
+                    const video = document.getElementById('videoView');
+                    video.srcObject = stream;
+                    // 映像読み込み完了時にサイズを合わせる
+                    video.onloadedmetadata = () => updateTransform();
                 });
             });
         }
@@ -119,7 +122,8 @@
 
             try {
                 localStream = await navigator.mediaDevices.getUserMedia(constraints);
-                document.getElementById('videoView').srcObject = localStream;
+                const video = document.getElementById('videoView');
+                video.srcObject = localStream;
                 const call = peer.call(MONITOR_ID, localStream);
                 
                 const pc = call.peerConnection;
@@ -138,21 +142,34 @@
             }
         }
 
-        // 回転機能
+        // 回転とサイズ調整のロジック
         function toggleRotate() { 
             rotation = (rotation + 90) % 360; 
+            updateTransform();
+        }
+
+        function updateTransform() {
             const video = document.getElementById('videoView');
             const container = document.getElementById('container');
             
-            // 90度/270度回転時に、縦長になった映像がはみ出さないように縮小率を計算
             if (rotation === 90 || rotation === 270) {
-                const ratio = container.clientHeight / container.clientWidth;
-                // コンテナの比率に合わせて、映像が収まるようにスケール調整
-                video.style.transform = `rotate(${rotation}deg) scale(${ratio})`;
+                // 縦長になった際、コンテナの「高さ」にフィットするように拡大率を計算
+                // 映像の縦横比を考慮して、はみ出さない最大の倍率を適用
+                const scale = container.clientWidth / container.clientHeight;
+                video.style.transform = `rotate(${rotation}deg) scale(${scale})`;
+                // さらに、縦に長くなりすぎるのを防ぐために幅を調整
+                video.style.width = container.clientHeight + "px";
+                video.style.height = container.clientWidth + "px";
             } else {
+                // 0度、180度の時は通常サイズ
                 video.style.transform = `rotate(${rotation}deg) scale(1)`;
+                video.style.width = "100%";
+                video.style.height = "100%";
             }
         }
+
+        // ウィンドウサイズが変わったら再計算
+        window.addEventListener('resize', updateTransform);
     </script>
 </body>
 </html>
