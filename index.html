@@ -2,11 +2,10 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>書画カメラ・プロ仕様</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>高画質書画カメラ・プロ</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
-        /* 画面全体のレイアウト調整 */
         body { 
             font-family: sans-serif; 
             background: #000; 
@@ -15,47 +14,49 @@
             display: flex; 
             flex-direction: column; 
             height: 100vh; 
+            height: 100dvh;
             overflow: hidden; 
         }
 
-        /* 映像エリア：ここを独立させることでボタン被りを防ぐ */
+        /* 映像エリア：回転してもはみ出さず、かつ小さくなりすぎないよう調整 */
         .video-container {
-            flex: 1; /* 残りのスペースをすべて使う */
+            flex: 1;
             position: relative;
             display: flex;
             align-items: center;
             justify-content: center;
-            overflow: hidden; /* 回転した映像がはみ出さないようにする */
             background: #111;
+            overflow: hidden;
         }
 
         video { 
+            position: absolute;
             max-width: 100%; 
             max-height: 100%; 
             background: #000; 
-            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); 
+            transition: transform 0.4s ease-in-out; 
             object-fit: contain;
         }
 
-        /* 操作パネル：画面下部に固定 */
+        /* 操作パネル：高さを十分に確保し、ボタンを押しやすく */
         .controls { 
-            height: 200px; /* パネルの高さを確保 */
-            background: #222; 
+            height: 220px; 
+            background: #2c2c2c; 
             display: grid; 
             grid-template-columns: repeat(3, 1fr); 
-            gap: 12px; 
-            padding: 15px;
+            gap: 10px; 
+            padding: 12px;
             box-sizing: border-box;
-            border-top: 2px solid #444;
-            z-index: 10; /* 映像より常に上に表示 */
+            border-top: 3px solid #555;
+            z-index: 100;
         }
 
         button { 
-            padding: 10px; 
-            font-size: 16px; 
-            border-radius: 10px; 
-            border: none; 
-            background: #444; 
+            padding: 8px 4px; 
+            font-size: 15px; 
+            border-radius: 12px; 
+            border: 1px solid #666; 
+            background: #4a4a4a; 
             color: white; 
             cursor: pointer; 
             font-weight: bold;
@@ -63,35 +64,36 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            line-height: 1.4;
         }
 
-        button:active { background: #666; }
-        .btn-main { background: #007bff; }
-        .btn-sub { background: #28a745; }
+        button:active { background: #777; }
+        .btn-main { background: #0066ff; border-color: #0088ff; } /* 視聴 */
+        .btn-sub { background: #228b22; border-color: #32cd32; } /* 配信 */
+        .btn-action { background: #606060; } /* 下段のボタン */
         
         .status { 
             grid-column: span 3; 
             font-size: 13px; 
-            color: #0f0; 
+            color: #afff00; 
             background: #000; 
-            padding: 5px;
-            border-radius: 5px;
-            margin-bottom: 5px;
+            padding: 6px;
+            border-radius: 6px;
+            margin-bottom: 4px;
+            overflow: hidden;
+            white-space: nowrap;
         }
 
-        /* 小さなアイコン代わりの記号 */
-        .icon { font-size: 20px; margin-bottom: 4px; }
+        .icon { font-size: 22px; margin-bottom: 4px; }
     </style>
 </head>
 <body>
 
-    <div class="video-container">
+    <div class="video-container" id="container">
         <video id="videoView" autoplay playsinline></video>
     </div>
 
     <div class="controls">
-        <div class="status" id="statusMsg">準備完了：PCまたはスマホで開始してください</div>
+        <div class="status" id="statusMsg">準備完了：PCなら①、スマホなら②を押してください</div>
         
         <button class="btn-main" onclick="startMonitor()">
             <span class="icon">💻</span>① PC<br>視聴開始
@@ -103,13 +105,13 @@
             <span class="icon">🔃</span>画面<br>リセット
         </button>
         
-        <button onclick="toggleRotate()">
+        <button class="btn-action" onclick="toggleRotate()">
             <span class="icon">🔄</span>映像を<br>回転
         </button>
-        <button onclick="toggleLight()">
+        <button class="btn-action" onclick="toggleLight()">
             <span class="icon">💡</span>ライト<br>ON/OFF
         </button>
-        <button onclick="toggleZoom()">
+        <button class="btn-action" onclick="toggleZoom()">
             <span class="icon">🔍</span>ズーム<br>切替
         </button>
     </div>
@@ -121,12 +123,11 @@
         let rotation = 0;
         let isZoomed = false;
 
-        // 【モニター側（PC）】
         function startMonitor() {
             if (peer) peer.destroy();
             peer = new Peer(MONITOR_ID);
             peer.on('open', () => {
-                document.getElementById('statusMsg').innerText = "PC：待機中... スマホで配信を開始してください。";
+                document.getElementById('statusMsg').innerText = "PC：待機中... スマホを操作してください。";
             });
             peer.on('call', call => {
                 call.answer();
@@ -137,7 +138,6 @@
             });
         }
 
-        // 【カメラ側（スマホ）】
         async function startCamera() {
             document.getElementById('statusMsg').innerText = "スマホ：カメラ起動中...";
             const constraints = {
@@ -155,14 +155,13 @@
                 document.getElementById('videoView').srcObject = localStream;
                 const call = peer.call(MONITOR_ID, localStream);
                 
-                // ビットレート固定処理
                 const pc = call.peerConnection;
                 pc.oniceconnectionstatechange = async () => {
                     if (pc.iceConnectionState === 'connected') {
                         const sender = pc.getSenders().find(s => s.track.kind === 'video');
                         const params = sender.getParameters();
                         if (!params.encodings) params.encodings = [{}];
-                        params.encodings[0].maxBitrate = 20000000; // 20Mbps
+                        params.encodings[0].maxBitrate = 20000000;
                         params.encodings[0].scaleResolutionDownBy = 1.0; 
                         await sender.setParameters(params);
                         document.getElementById('statusMsg').innerText = "高解像度通信を確立しました";
@@ -173,7 +172,6 @@
             }
         }
 
-        // 映像調整機能
         function toggleRotate() { 
             rotation = (rotation + 90) % 360; 
             updateTransform(); 
@@ -186,18 +184,19 @@
 
         function updateTransform() {
             const video = document.getElementById('videoView');
-            const scale = isZoomed ? 2.0 : 1.0;
+            const container = document.getElementById('container');
             
-            // 回転が90度か270度の場合、画面からはみ出さないようサイズを縮小調整する
-            let baseScale = 1;
+            let scale = isZoomed ? 2.0 : 1.0;
+            
+            // 回転が90度/270度の時、縦長になるので自動で拡大して画面にフィットさせる
             if (rotation === 90 || rotation === 270) {
-                // 画面の縦横比に合わせて自動調整
-                const container = document.querySelector('.video-container');
-                const ratio = container.clientHeight / container.clientWidth;
-                baseScale = Math.min(ratio, 1);
+                const containerRatio = container.clientWidth / container.clientHeight;
+                const videoRatio = video.videoWidth / video.videoHeight || 1.77;
+                // 画面いっぱいに広げるための倍率計算
+                scale *= Math.max(container.clientWidth / video.clientHeight, container.clientHeight / video.clientWidth) * 0.9;
             }
             
-            video.style.transform = `rotate(${rotation}deg) scale(${scale * baseScale})`;
+            video.style.transform = `rotate(${rotation}deg) scale(${scale})`;
         }
 
         async function toggleLight() {
@@ -207,9 +206,12 @@
             try {
                 await track.applyConstraints({ advanced: [{ torch: !settings.torch }] });
             } catch (e) {
-                alert("ライト制御はこの端末/ブラウザでは対応していません");
+                alert("ライト制御非対応");
             }
         }
+
+        // 映像サイズが変わったときに再計算
+        window.addEventListener('resize', updateTransform);
     </script>
 </body>
 </html>
