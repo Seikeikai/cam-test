@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>セキュア書画カメラ V6</title>
+    <title>セキュア書画カメラ V7</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         body { font-family: sans-serif; background: #000; margin: 0; display: flex; flex-direction: column; height: 100vh; height: 100dvh; overflow: hidden; }
@@ -12,9 +12,9 @@
         .controls { height: 100px; background: #1a1a1a; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 12px; box-sizing: border-box; border-top: 1px solid #333; z-index: 100; }
         button { font-size: 16px; border-radius: 12px; border: none; color: white; cursor: pointer; font-weight: bold; display: flex; flex-direction: column; align-items: center; justify-content: center; }
         button:active { opacity: 0.7; }
-        .btn-pc { background: #0066ff; }
-        .btn-sm { background: #28a745; }
-        .btn-rot { background: #444; }
+        .btn-sm { background: #28a745; } /* 配信 */
+        .btn-pc { background: #0066ff; } /* 視聴 */
+        .btn-rot { background: #444; }    /* 回転 */
         .icon { font-size: 20px; margin-bottom: 2px; }
     </style>
 </head>
@@ -31,20 +31,19 @@
     </div>
 
     <script>
-        const BASE_ID = 'skk-v6-final-'; 
+        const BASE_ID = 'skk-v7-final-'; 
         let peer = null;
         let rotation = 0;
         let localStream = null;
 
         // ① 配信開始（スマホ側）
         async function startCamera() {
-            const pass = prompt("【配信設定】パスワードを決めてください");
+            const pass = prompt("【スマホ】配信パスワードを決めてください");
             if (!pass) return;
 
             const targetID = BASE_ID + pass;
             if (peer) peer.destroy();
             
-            // 配信側を固定ID（パスワード付）で起動
             peer = new Peer(targetID, { debug: 1 });
             
             try {
@@ -53,66 +52,71 @@
                     audio: false
                 });
                 
-                const video = document.getElementById('videoView');
-                video.srcObject = localStream;
+                document.getElementById('videoView').srcObject = localStream;
 
                 peer.on('open', () => {
-                    alert("配信の準備ができました！\nPC側で②視聴を押し、パスワード「" + pass + "」を入力してください。");
+                    alert("【配信中】\nPCで②視聴を押し、「" + pass + "」と入力してください。\n（この画面は閉じずに待機してください）");
                 });
 
-                // 視聴側からの接続（call）を待ち受ける
                 peer.on('call', call => {
-                    call.answer(localStream); // 映像を送り返す
+                    call.answer(localStream);
                     setupHighBitrate(call);
                 });
 
-                video.onloadedmetadata = () => updateLayout();
-            } catch (err) { alert("カメラが起動できません: " + err); }
+                document.getElementById('videoView').onloadedmetadata = () => updateLayout();
+            } catch (err) { alert("カメラエラー: " + err); }
         }
 
         // ② 視聴開始（PC側）
         function startMonitor() {
-            const pass = prompt("【視聴設定】パスワードを入力してください");
+            const pass = prompt("【PC】パスワードを入力してください");
             if (!pass) return;
 
             const targetID = BASE_ID + pass;
             if (peer) peer.destroy();
             
-            // 視聴側は自身のIDはランダムで良い
+            // 視聴側は自身のIDはランダム
             peer = new Peer({ debug: 1 });
             
             peer.on('open', () => {
-                // 配信側のID（パスワード付）を呼び出す
-                const call = peer.call(targetID, new MediaStream());
+                const video = document.getElementById('videoView');
                 
-                call.on('stream', stream => {
-                    const video = document.getElementById('videoView');
-                    video.srcObject = stream;
-                    video.onloadedmetadata = () => updateLayout();
-                });
+                // 接続を試行する関数（リトライ付き）
+                const connect = () => {
+                    const call = peer.call(targetID, new MediaStream());
+                    
+                    call.on('stream', stream => {
+                        video.srcObject = stream;
+                        video.onloadedmetadata = () => updateLayout();
+                        // ブラウザによる自動再生ブロック対策
+                        video.play().catch(() => {
+                            alert("画面をクリックして映像を表示させてください");
+                        });
+                    });
+                };
 
-                // タイムアウト監視
+                connect();
+
+                // 映像が届かない場合の自動リトライ
                 setTimeout(() => {
-                    const video = document.getElementById('videoView');
-                    if (!video.srcObject || video.srcObject.getTracks().length === 0) {
-                        alert("映像が届きません。\n1. スマホ側で配信が先に始まっているか\n2. パスワードが正しいか\n確認してください。");
+                    if (!video.srcObject) {
+                        console.log("再接続を試みます...");
+                        connect();
                     }
-                }, 6000);
-            });
+                }, 2000);
 
-            peer.on('error', err => {
-                if(err.type === 'peer-not-found') alert("配信が見つかりません。パスワードを確認してください。");
-                else console.error(err);
+                // 最終タイムアウト
+                setTimeout(() => {
+                    if (!video.srcObject) alert("接続できません。スマホ側の配信が完了しているか確認してください。");
+                }, 7000);
             });
         }
 
-        // 高画質設定
         function setupHighBitrate(call) {
             const pc = call.peerConnection;
             pc.oniceconnectionstatechange = async () => {
                 if (pc.iceConnectionState === 'connected') {
-                    const senders = pc.getSenders();
-                    const sender = senders.find(s => s.track && s.track.kind === 'video');
+                    const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
                     if (sender) {
                         const params = sender.getParameters();
                         if (!params.encodings) params.encodings = [{}];
@@ -124,28 +128,20 @@
             };
         }
 
-        // ③ 回転
-        function toggleRotate() {
-            rotation = (rotation + 90) % 360;
-            updateLayout();
-        }
+        function toggleRotate() { rotation = (rotation + 90) % 360; updateLayout(); }
 
         function updateLayout() {
             const video = document.getElementById('videoView');
             const container = document.getElementById('container');
-            const vW = video.videoWidth; const vH = video.videoHeight;
-            if (!vW || !vH) return;
-
+            if (!video.videoWidth) return;
             const cW = container.clientWidth; const cH = container.clientHeight;
             let scale = (rotation === 0 || rotation === 180) 
-                        ? Math.min(cW / vW, cH / vH) 
-                        : Math.min(cW / vH, cH / vW);
-
-            video.style.width = vW + "px";
-            video.style.height = vH + "px";
+                        ? Math.min(cW / video.videoWidth, cH / video.videoHeight) 
+                        : Math.min(cW / video.videoHeight, cH / video.videoWidth);
+            video.style.width = video.videoWidth + "px";
+            video.style.height = video.videoHeight + "px";
             video.style.transform = `rotate(${rotation}deg) scale(${scale})`;
         }
-
         window.addEventListener('resize', updateLayout);
     </script>
 </body>
