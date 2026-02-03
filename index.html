@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>書画カメラ・全画面最適化版</title>
+    <title>書画カメラ・極大表示版</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         body { 
@@ -17,7 +17,6 @@
             overflow: hidden; 
         }
 
-        /* 映像エリア：ここを「基準」にして映像を収める */
         .video-container {
             flex: 1;
             position: relative;
@@ -25,31 +24,27 @@
             align-items: center;
             justify-content: center;
             background: #000;
-            overflow: hidden;
+            overflow: hidden; /* 回転してはみ出た部分を隠す */
         }
 
         video { 
             position: absolute;
-            /* 常に全体を収めるための設定 */
-            width: auto;
-            height: auto;
-            max-width: 100%;
-            max-height: 100%;
-            object-fit: contain; 
-            transition: transform 0.3s ease;
+            background: #000;
+            /* 拡大計算をJavaScriptで行うため、基本サイズは固定しない */
+            transition: transform 0.2s ease-out;
+            will-change: transform;
         }
 
-        /* 操作パネル：高さを固定し、ボタンを大きく表示 */
         .controls { 
             height: 100px; 
-            background: #222; 
+            background: #1a1a1a; 
             display: grid; 
             grid-template-columns: repeat(3, 1fr); 
             gap: 12px; 
             padding: 12px;
             box-sizing: border-box;
-            border-top: 1px solid #444;
-            z-index: 10;
+            border-top: 1px solid #333;
+            z-index: 100;
         }
 
         button { 
@@ -68,9 +63,8 @@
         button:active { opacity: 0.7; }
         .btn-pc { background: #0066ff; }
         .btn-sm { background: #28a745; }
-        .btn-rot { background: #555; }
-        
-        .icon { font-size: 22px; margin-bottom: 4px; }
+        .btn-rot { background: #444; }
+        .icon { font-size: 20px; margin-bottom: 2px; }
     </style>
 </head>
 <body>
@@ -80,24 +74,16 @@
     </div>
 
     <div class="controls">
-        <button class="btn-pc" onclick="startMonitor()">
-            <span class="icon">💻</span>① 視聴開始
-        </button>
-        <button class="btn-sm" onclick="startCamera()">
-            <span class="icon">📱</span>② 配信開始
-        </button>
-        <button class="btn-rot" onclick="toggleRotate()">
-            <span class="icon">🔄</span>映像を回転
-        </button>
+        <button class="btn-pc" onclick="startMonitor()"><span class="icon">💻</span>① 視聴開始</button>
+        <button class="btn-sm" onclick="startCamera()"><span class="icon">📱</span>② 配信開始</button>
+        <button class="btn-rot" onclick="toggleRotate()"><span class="icon">🔄</span>映像を回転</button>
     </div>
 
     <script>
         const MONITOR_ID = 'seikeikai-monitor-2026';
         let peer = new Peer({ debug: 1 });
-        let localStream;
         let rotation = 0;
 
-        // PC側の処理
         function startMonitor() {
             if (peer) peer.destroy();
             peer = new Peer(MONITOR_ID);
@@ -106,29 +92,22 @@
                 call.on('stream', stream => {
                     const video = document.getElementById('videoView');
                     video.srcObject = stream;
-                    video.onloadedmetadata = () => updateTransform();
+                    video.onloadedmetadata = () => updateLayout();
                 });
             });
         }
 
-        // スマホ側の処理
         async function startCamera() {
             const constraints = {
-                video: {
-                    width: { ideal: 3840, min: 1920 },
-                    height: { ideal: 2160, min: 1080 },
-                    facingMode: "environment",
-                    frameRate: { max: 15 }
-                },
+                video: { width: { ideal: 3840 }, height: { ideal: 2160 }, facingMode: "environment", frameRate: { max: 15 } },
                 audio: false
             };
-
             try {
-                localStream = await navigator.mediaDevices.getUserMedia(constraints);
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
                 const video = document.getElementById('videoView');
-                video.srcObject = localStream;
-                const call = peer.call(MONITOR_ID, localStream);
-                
+                video.srcObject = stream;
+                const call = peer.call(MONITOR_ID, stream);
+                // 高ビットレート強制設定
                 const pc = call.peerConnection;
                 pc.oniceconnectionstatechange = async () => {
                     if (pc.iceConnectionState === 'connected') {
@@ -136,48 +115,46 @@
                         const params = sender.getParameters();
                         if (!params.encodings) params.encodings = [{}];
                         params.encodings[0].maxBitrate = 20000000;
-                        params.encodings[0].scaleResolutionDownBy = 1.0; 
+                        params.encodings[0].scaleResolutionDownBy = 1.0;
                         await sender.setParameters(params);
                     }
                 };
-            } catch (err) {
-                alert("カメラエラー: " + err);
-            }
+                video.onloadedmetadata = () => updateLayout();
+            } catch (err) { alert(err); }
         }
 
-        // 回転とサイズ調整のロジック
-        function toggleRotate() { 
-            rotation = (rotation + 90) % 360; 
-            updateTransform();
+        function toggleRotate() {
+            rotation = (rotation + 90) % 360;
+            updateLayout();
         }
 
-        function updateTransform() {
+        function updateLayout() {
             const video = document.getElementById('videoView');
             const container = document.getElementById('container');
-            
-            // 映像本来のサイズを取得
-            const vWidth = video.videoWidth;
-            const vHeight = video.videoHeight;
-            if (!vWidth || !vHeight) return;
+            const vW = video.videoWidth;
+            const vH = video.videoHeight;
+            const cW = container.clientWidth;
+            const cH = container.clientHeight;
 
-            if (rotation === 90 || rotation === 270) {
-                // 90/270度回転時：
-                // 「映像の横幅」が「コンテナの高さ」に、「映像の高さ」が「コンテナの横幅」に収まる倍率を計算
-                const ratio = Math.min(container.clientWidth / vHeight, container.clientHeight / vWidth);
-                video.style.transform = `rotate(${rotation}deg) scale(${ratio})`;
-                // 回転時のズレを防ぐため、基準サイズを明示的に指定
-                video.style.width = vWidth + "px";
-                video.style.height = vHeight + "px";
+            if (!vW || !vH) return;
+
+            let scale = 1;
+
+            if (rotation === 0 || rotation === 180) {
+                // 通常時：コンテナに収まる最大倍率
+                scale = Math.min(cW / vW, cH / vH);
             } else {
-                // 0/180度回転時：
-                video.style.transform = `rotate(${rotation}deg) scale(1)`;
-                video.style.width = "100%";
-                video.style.height = "100%";
+                // 90/270度回転時：縦横が入れ替わるので、入れ替えたサイズで最大倍率を計算
+                scale = Math.min(cW / vH, cH / vW);
             }
+
+            // videoタグ自体のサイズを映像本来の解像度に設定し、CSSのscaleでコンテナにフィットさせる
+            video.style.width = vW + "px";
+            video.style.height = vH + "px";
+            video.style.transform = `rotate(${rotation}deg) scale(${scale})`;
         }
 
-        // ウィンドウサイズが変わったら自動で再調整
-        window.addEventListener('resize', updateTransform);
+        window.addEventListener('resize', updateLayout);
     </script>
 </body>
 </html>
