@@ -3,15 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>自作・高画質書画カメラ</title>
+    <title>高画質書画カメラ（完全版）</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         body { font-family: sans-serif; background: #222; color: white; text-align: center; margin: 0; overflow: hidden; }
-        video { width: 100dvw; height: 80dvh; object-fit: contain; background: #000; transition: transform 0.3s; }
-        .controls { padding: 10px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; background: #333; height: 20dvh; }
-        button { padding: 10px; font-size: 14px; border-radius: 8px; border: none; background: #444; color: white; cursor: pointer; }
-        button:active { background: #666; }
-        .active { background: #007bff; }
+        /* 映像表示エリア */
+        video { width: 100dvw; height: 75dvh; object-fit: contain; background: #000; transition: transform 0.3s; }
+        /* 操作パネル */
+        .controls { padding: 10px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; background: #333; height: 25dvh; box-sizing: border-box; }
+        button { padding: 10px; font-size: 14px; border-radius: 8px; border: none; background: #555; color: white; cursor: pointer; font-weight: bold; }
+        button:active { background: #888; }
+        .btn-main { background: #007bff; } /* 主要ボタン */
+        .btn-sub { background: #28a745; }  /* 主要ボタン */
+        .status { font-size: 12px; grid-column: span 3; color: #aaa; }
     </style>
 </head>
 <body>
@@ -19,42 +23,73 @@
     <video id="videoView" autoplay playsinline></video>
 
     <div class="controls">
-        <button onclick="startMonitor()" id="btnMon">① PC：視聴開始</button>
-        <button onclick="startCamera()" id="btnCam">② スマホ：配信開始</button>
-        <button onclick="toggleRotate()">🔄 映像回転</button>
-        <button onclick="toggleLight()">💡 ライト点灯</button>
-        <button onclick="toggleZoom()">🔍 ズーム</button>
-        <button onclick="location.reload()">🔃 リセット</button>
+        <div class="status" id="statusMsg">準備中...</div>
+        
+        <button class="btn-main" onclick="startMonitor()">① PC<br>視聴開始</button>
+        <button class="btn-sub" onclick="startCamera()">② スマホ<br>配信開始</button>
+        <button onclick="location.reload()">🔃<br>リセット</button>
+        
+        <button onclick="toggleRotate()">🔄<br>映像回転</button>
+        <button onclick="toggleLight()">💡<br>ライト</button>
+        <button onclick="toggleZoom()">🔍<br>ズーム</button>
     </div>
 
     <script>
-        // IDは他と被らないようにユニークなものを設定
-        const PEER_ID = 'seikeikai-doc-cam-2026'; 
-        const peer = new Peer(PEER_ID);
+        // IDの設定：モニター（受信）とカメラ（送信）を明確に分ける
+        const MONITOR_ID = 'seikeikai-monitor-2026';
+        const CAMERA_ID  = 'seikeikai-camera-2026';
+        
+        let peer;
         let localStream;
         let rotation = 0;
         let isZoomed = false;
 
-        // 【モニター側（受信）】
+        // Peerの初期化
+        // スマホかPCか判断しにくいので、開いた瞬間に接続を確立する
+        peer = new Peer({
+            debug: 2
+        });
+
+        peer.on('open', (id) => {
+            document.getElementById('statusMsg').innerText = "サーバー接続完了。ボタンを押してください。";
+        });
+
+        peer.on('error', (err) => {
+            console.error(err);
+            document.getElementById('statusMsg').innerText = "エラー: " + err.type;
+        });
+
+        // 【① PC（モニター側）の処理】
         function startMonitor() {
-            document.getElementById('btnMon').classList.add('active');
+            // モニターは特定のID（MONITOR_ID）で待ち受けたいので、一度作り直す
+            if (peer) peer.destroy();
+            
+            peer = new Peer(MONITOR_ID);
+            
+            peer.on('open', () => {
+                document.getElementById('statusMsg').innerText = "モニター待機中... スマホで配信を開始してください。";
+            });
+
             peer.on('call', call => {
-                call.answer();
+                document.getElementById('statusMsg').innerText = "接続中...";
+                call.answer(); // 着信に応答
                 call.on('stream', stream => {
                     document.getElementById('videoView').srcObject = stream;
+                    document.getElementById('statusMsg').innerText = "受信中！";
                 });
             });
         }
 
-        // 【カメラ側（送信）】
+        // 【② スマホ（カメラ側）の処理】
         async function startCamera() {
-            document.getElementById('btnCam').classList.add('active');
+            document.getElementById('statusMsg').innerText = "カメラ起動中...";
+            
             const constraints = {
                 video: {
-                    width: { ideal: 3840 }, // 4Kをリクエスト
+                    width: { ideal: 3840 }, 
                     height: { ideal: 2160 },
                     facingMode: "environment", // 背面カメラ
-                    frameRate: { ideal: 20 }  // 書画カメラなので少し落として画質優先
+                    frameRate: { ideal: 20 }
                 },
                 audio: false
             };
@@ -62,36 +97,47 @@
             try {
                 localStream = await navigator.mediaDevices.getUserMedia(constraints);
                 document.getElementById('videoView').srcObject = localStream;
-                peer.call(PEER_ID, localStream);
+                
+                document.getElementById('statusMsg').innerText = "モニターに接続しています...";
+                
+                // モニター（MONITOR_ID）に電話をかける
+                const call = peer.call(MONITOR_ID, localStream);
+                
+                if(!call) {
+                    alert("接続に失敗しました。PC側が待機状態か確認してください。");
+                }
             } catch (err) {
-                alert("カメラ起動エラー: " + err);
+                alert("カメラ許可エラー: " + err);
+                document.getElementById('statusMsg').innerText = "エラー: カメラが見つかりません。";
             }
         }
 
-        // 映像を90度ずつ回転
+        // 映像調整機能
         function toggleRotate() {
             rotation = (rotation + 90) % 360;
-            document.getElementById('videoView').style.transform = `rotate(${rotation}deg) scale(${isZoomed ? 1.5 : 1})`;
+            updateTransform();
         }
 
-        // デジタルズーム（1.5倍）
         function toggleZoom() {
             isZoomed = !isZoomed;
-            document.getElementById('videoView').style.transform = `rotate(${rotation}deg) scale(${isZoomed ? 1.5 : 1})`;
+            updateTransform();
         }
 
-        // ライト点灯（スマホのみ有効）
+        function updateTransform() {
+            const scale = isZoomed ? 1.5 : 1;
+            document.getElementById('videoView').style.transform = `rotate(${rotation}deg) scale(${scale})`;
+        }
+
         async function toggleLight() {
             if (!localStream) return;
             const track = localStream.getVideoTracks()[0];
-            const capabilities = track.getCapabilities();
-            if (capabilities.torch) {
+            try {
                 const settings = track.getSettings();
                 await track.applyConstraints({
                     advanced: [{ torch: !settings.torch }]
                 });
-            } else {
-                alert("この端末はライト制御に対応していません");
+            } catch (e) {
+                alert("このブラウザ/端末はライト制御に対応していません。");
             }
         }
     </script>
