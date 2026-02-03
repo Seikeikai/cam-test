@@ -3,14 +3,64 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>セキュア書画カメラ V7</title>
+    <title>高画質書画カメラ・シンプル</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
-        body { font-family: sans-serif; background: #000; margin: 0; display: flex; flex-direction: column; height: 100vh; height: 100dvh; overflow: hidden; }
-        .video-container { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden; }
-        video { position: absolute; background: #000; transition: transform 0.2s ease-out; will-change: transform; }
-        .controls { height: 100px; background: #1a1a1a; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 12px; box-sizing: border-box; border-top: 1px solid #333; z-index: 100; }
-        button { font-size: 16px; border-radius: 12px; border: none; color: white; cursor: pointer; font-weight: bold; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        body { 
+            font-family: sans-serif; 
+            background: #000; 
+            margin: 0; 
+            display: flex; 
+            flex-direction: column; 
+            height: 100vh; 
+            height: 100dvh;
+            overflow: hidden; 
+        }
+
+        /* 映像エリア：余白を最小化するコンテナ */
+        .video-container {
+            flex: 1;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #000;
+            overflow: hidden;
+        }
+
+        video { 
+            position: absolute;
+            background: #000;
+            transition: transform 0.2s ease-out;
+            will-change: transform;
+        }
+
+        /* 操作パネル：ボタン3つ */
+        .controls { 
+            height: 100px; 
+            background: #1a1a1a; 
+            display: grid; 
+            grid-template-columns: repeat(3, 1fr); 
+            gap: 12px; 
+            padding: 12px;
+            box-sizing: border-box;
+            border-top: 1px solid #333;
+            z-index: 100;
+        }
+
+        button { 
+            font-size: 16px; 
+            border-radius: 12px; 
+            border: none; 
+            color: white; 
+            cursor: pointer; 
+            font-weight: bold;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
         button:active { opacity: 0.7; }
         .btn-sm { background: #28a745; } /* 配信 */
         .btn-pc { background: #0066ff; } /* 視聴 */
@@ -31,20 +81,16 @@
     </div>
 
     <script>
-        const BASE_ID = 'skk-v7-final-'; 
+        // パスワードなしの固定ID
+        const MONITOR_ID = 'skk-simple-direct-2026'; 
         let peer = null;
         let rotation = 0;
         let localStream = null;
 
-        // ① 配信開始（スマホ側）
+        // ① スマホ側：配信
         async function startCamera() {
-            const pass = prompt("【スマホ】配信パスワードを決めてください");
-            if (!pass) return;
-
-            const targetID = BASE_ID + pass;
             if (peer) peer.destroy();
-            
-            peer = new Peer(targetID, { debug: 1 });
+            peer = new Peer(MONITOR_ID, { debug: 1 });
             
             try {
                 localStream = await navigator.mediaDevices.getUserMedia({
@@ -52,63 +98,44 @@
                     audio: false
                 });
                 
-                document.getElementById('videoView').srcObject = localStream;
+                const video = document.getElementById('videoView');
+                video.srcObject = localStream;
 
                 peer.on('open', () => {
-                    alert("【配信中】\nPCで②視聴を押し、「" + pass + "」と入力してください。\n（この画面は閉じずに待機してください）");
+                    console.log("配信ID登録完了");
                 });
 
+                // 受信待ち受け
                 peer.on('call', call => {
                     call.answer(localStream);
                     setupHighBitrate(call);
                 });
 
-                document.getElementById('videoView').onloadedmetadata = () => updateLayout();
-            } catch (err) { alert("カメラエラー: " + err); }
+                video.onloadedmetadata = () => updateLayout();
+            } catch (err) { alert("カメラ起動エラー: " + err); }
         }
 
-        // ② 視聴開始（PC側）
+        // ② PC側：視聴
         function startMonitor() {
-            const pass = prompt("【PC】パスワードを入力してください");
-            if (!pass) return;
-
-            const targetID = BASE_ID + pass;
             if (peer) peer.destroy();
-            
-            // 視聴側は自身のIDはランダム
             peer = new Peer({ debug: 1 });
             
             peer.on('open', () => {
-                const video = document.getElementById('videoView');
+                const call = peer.call(MONITOR_ID, new MediaStream());
                 
-                // 接続を試行する関数（リトライ付き）
-                const connect = () => {
-                    const call = peer.call(targetID, new MediaStream());
-                    
-                    call.on('stream', stream => {
-                        video.srcObject = stream;
-                        video.onloadedmetadata = () => updateLayout();
-                        // ブラウザによる自動再生ブロック対策
-                        video.play().catch(() => {
-                            alert("画面をクリックして映像を表示させてください");
-                        });
-                    });
-                };
+                call.on('stream', stream => {
+                    const video = document.getElementById('videoView');
+                    video.srcObject = stream;
+                    video.onloadedmetadata = () => updateLayout();
+                    video.play().catch(() => {});
+                });
 
-                connect();
-
-                // 映像が届かない場合の自動リトライ
+                // 接続確認
                 setTimeout(() => {
-                    if (!video.srcObject) {
-                        console.log("再接続を試みます...");
-                        connect();
+                    if (!document.getElementById('videoView').srcObject) {
+                        alert("映像が届きません。先にスマホで「①配信」を押してください。");
                     }
-                }, 2000);
-
-                // 最終タイムアウト
-                setTimeout(() => {
-                    if (!video.srcObject) alert("接続できません。スマホ側の配信が完了しているか確認してください。");
-                }, 7000);
+                }, 4000);
             });
         }
 
@@ -128,20 +155,27 @@
             };
         }
 
-        function toggleRotate() { rotation = (rotation + 90) % 360; updateLayout(); }
+        function toggleRotate() {
+            rotation = (rotation + 90) % 360;
+            updateLayout();
+        }
 
         function updateLayout() {
             const video = document.getElementById('videoView');
             const container = document.getElementById('container');
-            if (!video.videoWidth) return;
+            const vW = video.videoWidth; const vH = video.videoHeight;
+            if (!vW || !vH) return;
+
             const cW = container.clientWidth; const cH = container.clientHeight;
             let scale = (rotation === 0 || rotation === 180) 
-                        ? Math.min(cW / video.videoWidth, cH / video.videoHeight) 
-                        : Math.min(cW / video.videoHeight, cH / video.videoWidth);
-            video.style.width = video.videoWidth + "px";
-            video.style.height = video.videoHeight + "px";
+                        ? Math.min(cW / vW, cH / vH) 
+                        : Math.min(cW / vH, cH / vW);
+
+            video.style.width = vW + "px";
+            video.style.height = vH + "px";
             video.style.transform = `rotate(${rotation}deg) scale(${scale})`;
         }
+
         window.addEventListener('resize', updateLayout);
     </script>
 </body>
