@@ -1,45 +1,98 @@
 <!DOCTYPE html>
-<html>
+<html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mobile P2P Cam</title>
+    <title>自作・高画質書画カメラ</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
-        video { width: 100%; background: #000; transform: rotate(0deg); }
-        button { padding: 15px; margin: 10px; font-size: 16px; }
+        body { font-family: sans-serif; background: #222; color: white; text-align: center; margin: 0; overflow: hidden; }
+        video { width: 100dvw; height: 80dvh; object-fit: contain; background: #000; transition: transform 0.3s; }
+        .controls { padding: 10px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; background: #333; height: 20dvh; }
+        button { padding: 10px; font-size: 14px; border-radius: 8px; border: none; background: #444; color: white; cursor: pointer; }
+        button:active { background: #666; }
+        .active { background: #007bff; }
     </style>
 </head>
 <body>
+
     <video id="videoView" autoplay playsinline></video>
-    <hr>
-    <button onclick="startCamera()">① カメラ側（配信）</button>
-    <button onclick="startMonitor()">② モニター側（視聴）</button>
+
+    <div class="controls">
+        <button onclick="startMonitor()" id="btnMon">① PC：視聴開始</button>
+        <button onclick="startCamera()" id="btnCam">② スマホ：配信開始</button>
+        <button onclick="toggleRotate()">🔄 映像回転</button>
+        <button onclick="toggleLight()">💡 ライト点灯</button>
+        <button onclick="toggleZoom()">🔍 ズーム</button>
+        <button onclick="location.reload()">🔃 リセット</button>
+    </div>
 
     <script>
-        const peer = new Peer('my-p2p-camera-id'); // IDは共通
+        // IDは他と被らないようにユニークなものを設定
+        const PEER_ID = 'seikeikai-doc-cam-2026'; 
+        const peer = new Peer(PEER_ID);
+        let localStream;
+        let rotation = 0;
+        let isZoomed = false;
 
-        // 【モニター側】映像が送られてきたら表示
+        // 【モニター側（受信）】
         function startMonitor() {
+            document.getElementById('btnMon').classList.add('active');
             peer.on('call', call => {
-                call.answer(); 
+                call.answer();
                 call.on('stream', stream => {
                     document.getElementById('videoView').srcObject = stream;
                 });
             });
-            alert("モニター待機中...");
         }
 
-        // 【カメラ側】高画質で配信開始
+        // 【カメラ側（送信）】
         async function startCamera() {
+            document.getElementById('btnCam').classList.add('active');
             const constraints = {
-                video: { width: 1920, height: 1080, facingMode: "environment" },
+                video: {
+                    width: { ideal: 3840 }, // 4Kをリクエスト
+                    height: { ideal: 2160 },
+                    facingMode: "environment", // 背面カメラ
+                    frameRate: { ideal: 20 }  // 書画カメラなので少し落として画質優先
+                },
                 audio: false
             };
-            const stream = await navigator.mediaDevices.getUserMedia(constraints);
-            document.getElementById('videoView').srcObject = stream;
-            peer.call('my-p2p-camera-id', stream);
-            alert("配信中...");
+
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia(constraints);
+                document.getElementById('videoView').srcObject = localStream;
+                peer.call(PEER_ID, localStream);
+            } catch (err) {
+                alert("カメラ起動エラー: " + err);
+            }
+        }
+
+        // 映像を90度ずつ回転
+        function toggleRotate() {
+            rotation = (rotation + 90) % 360;
+            document.getElementById('videoView').style.transform = `rotate(${rotation}deg) scale(${isZoomed ? 1.5 : 1})`;
+        }
+
+        // デジタルズーム（1.5倍）
+        function toggleZoom() {
+            isZoomed = !isZoomed;
+            document.getElementById('videoView').style.transform = `rotate(${rotation}deg) scale(${isZoomed ? 1.5 : 1})`;
+        }
+
+        // ライト点灯（スマホのみ有効）
+        async function toggleLight() {
+            if (!localStream) return;
+            const track = localStream.getVideoTracks()[0];
+            const capabilities = track.getCapabilities();
+            if (capabilities.torch) {
+                const settings = track.getSettings();
+                await track.applyConstraints({
+                    advanced: [{ torch: !settings.torch }]
+                });
+            } else {
+                alert("この端末はライト制御に対応していません");
+            }
         }
     </script>
 </body>
