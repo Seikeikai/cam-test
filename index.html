@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mobile P2P Cam</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        video { width: 100%; background: #000; transform: rotate(0deg); }
+        button { padding: 15px; margin: 10px; font-size: 16px; }
+    </style>
+</head>
+<body>
+    <video id="videoView" autoplay playsinline></video>
+    <hr>
+    <button onclick="startCamera()">① カメラ側（配信）</button>
+    <button onclick="startMonitor()">② モニター側（視聴）</button>
+
+    <script>
+        const peer = new Peer('my-p2p-camera-id'); // IDは共通
+
+        // 【モニター側】映像が送られてきたら表示
+        function startMonitor() {
+            peer.on('call', call => {
+                call.answer(); 
+                call.on('stream', stream => {
+                    document.getElementById('videoView').srcObject = stream;
+                });
+            });
+            alert("モニター待機中...");
+        }
+
+        // 【カメラ側】高画質で配信開始
+        async function startCamera() {
+            const constraints = {
+                video: { width: 1920, height: 1080, facingMode: "environment" },
+                audio: false
+            };
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            document.getElementById('videoView').srcObject = stream;
+            peer.call('my-p2p-camera-id', stream);
+            alert("配信中...");
+        }
+    </script>
+</body>
+</html>
