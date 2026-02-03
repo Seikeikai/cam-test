@@ -3,19 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>高画質書画カメラ（完全版）</title>
+    <title>超高解像度・書画カメラ</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
-        body { font-family: sans-serif; background: #222; color: white; text-align: center; margin: 0; overflow: hidden; }
-        /* 映像表示エリア */
+        body { font-family: sans-serif; background: #1a1a1a; color: white; text-align: center; margin: 0; overflow: hidden; }
         video { width: 100dvw; height: 75dvh; object-fit: contain; background: #000; transition: transform 0.3s; }
-        /* 操作パネル */
         .controls { padding: 10px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; background: #333; height: 25dvh; box-sizing: border-box; }
         button { padding: 10px; font-size: 14px; border-radius: 8px; border: none; background: #555; color: white; cursor: pointer; font-weight: bold; }
         button:active { background: #888; }
-        .btn-main { background: #007bff; } /* 主要ボタン */
-        .btn-sub { background: #28a745; }  /* 主要ボタン */
-        .status { font-size: 12px; grid-column: span 3; color: #aaa; }
+        .btn-main { background: #007bff; }
+        .btn-sub { background: #28a745; }
+        .status { font-size: 12px; grid-column: span 3; color: #00ff00; background: #000; padding: 2px; }
     </style>
 </head>
 <body>
@@ -23,7 +21,7 @@
     <video id="videoView" autoplay playsinline></video>
 
     <div class="controls">
-        <div class="status" id="statusMsg">準備中...</div>
+        <div class="status" id="statusMsg">サーバー接続待機中...</div>
         
         <button class="btn-main" onclick="startMonitor()">① PC<br>視聴開始</button>
         <button class="btn-sub" onclick="startCamera()">② スマホ<br>配信開始</button>
@@ -35,61 +33,42 @@
     </div>
 
     <script>
-        // IDの設定：モニター（受信）とカメラ（送信）を明確に分ける
         const MONITOR_ID = 'seikeikai-monitor-2026';
-        const CAMERA_ID  = 'seikeikai-camera-2026';
-        
-        let peer;
+        let peer = new Peer({ debug: 2 });
         let localStream;
         let rotation = 0;
         let isZoomed = false;
 
-        // Peerの初期化
-        // スマホかPCか判断しにくいので、開いた瞬間に接続を確立する
-        peer = new Peer({
-            debug: 2
-        });
-
         peer.on('open', (id) => {
-            document.getElementById('statusMsg').innerText = "サーバー接続完了。ボタンを押してください。";
+            document.getElementById('statusMsg').innerText = "準備完了。PCかスマホのボタンを押してください。";
         });
 
-        peer.on('error', (err) => {
-            console.error(err);
-            document.getElementById('statusMsg').innerText = "エラー: " + err.type;
-        });
-
-        // 【① PC（モニター側）の処理】
+        // 【① 受信側：PC】
         function startMonitor() {
-            // モニターは特定のID（MONITOR_ID）で待ち受けたいので、一度作り直す
             if (peer) peer.destroy();
-            
             peer = new Peer(MONITOR_ID);
-            
             peer.on('open', () => {
-                document.getElementById('statusMsg').innerText = "モニター待機中... スマホで配信を開始してください。";
+                document.getElementById('statusMsg').innerText = "モニター待機中... スマホを操作してください。";
             });
-
             peer.on('call', call => {
-                document.getElementById('statusMsg').innerText = "接続中...";
-                call.answer(); // 着信に応答
+                call.answer();
                 call.on('stream', stream => {
                     document.getElementById('videoView').srcObject = stream;
-                    document.getElementById('statusMsg').innerText = "受信中！";
+                    document.getElementById('statusMsg').innerText = "受信中：高解像度モード";
                 });
             });
         }
 
-        // 【② スマホ（カメラ側）の処理】
+        // 【② 送信側：スマホ】
         async function startCamera() {
-            document.getElementById('statusMsg').innerText = "カメラ起動中...";
+            document.getElementById('statusMsg').innerText = "カメラ初期化中...";
             
             const constraints = {
                 video: {
-                    width: { ideal: 3840 }, 
-                    height: { ideal: 2160 },
-                    facingMode: "environment", // 背面カメラ
-                    frameRate: { ideal: 20 }
+                    width: { ideal: 3840, min: 1920 }, // 4Kを優先、最低でもフルHD
+                    height: { ideal: 2160, min: 1080 },
+                    facingMode: "environment",
+                    frameRate: { max: 15 } // カクつきを許容し、1コマの画質を稼ぐ
                 },
                 audio: false
             };
@@ -98,47 +77,41 @@
                 localStream = await navigator.mediaDevices.getUserMedia(constraints);
                 document.getElementById('videoView').srcObject = localStream;
                 
-                document.getElementById('statusMsg').innerText = "モニターに接続しています...";
-                
-                // モニター（MONITOR_ID）に電話をかける
                 const call = peer.call(MONITOR_ID, localStream);
                 
-                if(!call) {
-                    alert("接続に失敗しました。PC側が待機状態か確認してください。");
-                }
+                // --- ビットレートと解像度保持の強制設定 ---
+                const pc = call.peerConnection;
+                pc.oniceconnectionstatechange = async () => {
+                    if (pc.iceConnectionState === 'connected') {
+                        const senders = pc.getSenders();
+                        const sender = senders.find(s => s.track.kind === 'video');
+                        const params = sender.getParameters();
+                        if (!params.encodings) params.encodings = [{}];
+                        
+                        // ビットレートを20Mbpsに設定（Wi-Fi環境推奨）
+                        params.encodings[0].maxBitrate = 20000000; 
+                        // 解像度の低下を絶対に許可しない
+                        params.encodings[0].scaleResolutionDownBy = 1.0; 
+                        
+                        await sender.setParameters(params);
+                        document.getElementById('statusMsg').innerText = "高解像度ロック完了";
+                    }
+                };
             } catch (err) {
-                alert("カメラ許可エラー: " + err);
-                document.getElementById('statusMsg').innerText = "エラー: カメラが見つかりません。";
+                alert("カメラエラー: " + err);
             }
         }
 
-        // 映像調整機能
-        function toggleRotate() {
-            rotation = (rotation + 90) % 360;
-            updateTransform();
-        }
-
-        function toggleZoom() {
-            isZoomed = !isZoomed;
-            updateTransform();
-        }
-
+        function toggleRotate() { rotation = (rotation + 90) % 360; updateTransform(); }
+        function toggleZoom() { isZoomed = !isZoomed; updateTransform(); }
         function updateTransform() {
-            const scale = isZoomed ? 1.5 : 1;
+            const scale = isZoomed ? 2.0 : 1;
             document.getElementById('videoView').style.transform = `rotate(${rotation}deg) scale(${scale})`;
         }
-
         async function toggleLight() {
-            if (!localStream) return;
             const track = localStream.getVideoTracks()[0];
-            try {
-                const settings = track.getSettings();
-                await track.applyConstraints({
-                    advanced: [{ torch: !settings.torch }]
-                });
-            } catch (e) {
-                alert("このブラウザ/端末はライト制御に対応していません。");
-            }
+            const settings = track.getSettings();
+            await track.applyConstraints({ advanced: [{ torch: !settings.torch }] });
         }
     </script>
 </body>
