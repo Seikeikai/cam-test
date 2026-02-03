@@ -3,63 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>書画カメラ・極大表示版</title>
+    <title>セキュア書画カメラ V4</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
-        body { 
-            font-family: sans-serif; 
-            background: #000; 
-            margin: 0; 
-            display: flex; 
-            flex-direction: column; 
-            height: 100vh; 
-            height: 100dvh;
-            overflow: hidden; 
-        }
-
-        .video-container {
-            flex: 1;
-            position: relative;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: #000;
-            overflow: hidden; /* 回転してはみ出た部分を隠す */
-        }
-
-        video { 
-            position: absolute;
-            background: #000;
-            /* 拡大計算をJavaScriptで行うため、基本サイズは固定しない */
-            transition: transform 0.2s ease-out;
-            will-change: transform;
-        }
-
-        .controls { 
-            height: 100px; 
-            background: #1a1a1a; 
-            display: grid; 
-            grid-template-columns: repeat(3, 1fr); 
-            gap: 12px; 
-            padding: 12px;
-            box-sizing: border-box;
-            border-top: 1px solid #333;
-            z-index: 100;
-        }
-
-        button { 
-            font-size: 16px; 
-            border-radius: 12px; 
-            border: none; 
-            color: white; 
-            cursor: pointer; 
-            font-weight: bold;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-        }
-
+        body { font-family: sans-serif; background: #000; margin: 0; display: flex; flex-direction: column; height: 100vh; height: 100dvh; overflow: hidden; }
+        .video-container { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden; }
+        video { position: absolute; background: #000; transition: transform 0.2s ease-out; will-change: transform; }
+        .controls { height: 100px; background: #1a1a1a; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 12px; box-sizing: border-box; border-top: 1px solid #333; z-index: 100; }
+        button { font-size: 16px; border-radius: 12px; border: none; color: white; cursor: pointer; font-weight: bold; display: flex; flex-direction: column; align-items: center; justify-content: center; }
         button:active { opacity: 0.7; }
         .btn-pc { background: #0066ff; }
         .btn-sm { background: #28a745; }
@@ -74,55 +25,92 @@
     </div>
 
     <div class="controls">
-        <button class="btn-pc" onclick="startMonitor()"><span class="icon">💻</span>① 視聴開始</button>
-        <button class="btn-sm" onclick="startCamera()"><span class="icon">📱</span>② 配信開始</button>
-        <button class="btn-rot" onclick="toggleRotate()"><span class="icon">🔄</span>映像を回転</button>
+        <button class="btn-sm" onclick="startCamera()"><span class="icon">📱</span>① 配信開始</button>
+        <button class="btn-pc" onclick="startMonitor()"><span class="icon">💻</span>② 視聴開始</button>
+        <button class="btn-rot" onclick="toggleRotate()"><span class="icon">🔄</span>③ 映像を回転</button>
     </div>
 
     <script>
-        const MONITOR_ID = 'seikeikai-monitor-2026';
-        let peer = new Peer({ debug: 1 });
+        const BASE_ID = 'skk-v4-secure-'; // 共通のID接頭辞
+        let peer = null;
         let rotation = 0;
 
-        function startMonitor() {
+        // ① スマホ側：配信開始
+        async function startCamera() {
+            const pass = prompt("配信パスワードを設定してください（数字や英字）");
+            if (!pass) return;
+
+            const targetID = BASE_ID + pass;
             if (peer) peer.destroy();
-            peer = new Peer(MONITOR_ID);
-            peer.on('call', call => {
-                call.answer();
+            
+            // 設定したパスワードをIDに組み込んでPeerを作成
+            peer = new Peer(targetID, { debug: 1 });
+            
+            const constraints = {
+                video: { width: { ideal: 3840 }, height: { ideal: 2160 }, facingMode: "environment", frameRate: { max: 15 } },
+                audio: false
+            };
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                const video = document.getElementById('videoView');
+                video.srcObject = stream;
+                
+                // 接続待ち受け
+                peer.on('call', call => {
+                    call.answer();
+                    setupHighBitrate(call);
+                });
+
+                video.onloadedmetadata = () => updateLayout();
+                alert("配信を開始しました。パスワード: " + pass);
+            } catch (err) { alert("カメラエラー: " + err); }
+        }
+
+        // ② PC側：視聴開始
+        function startMonitor() {
+            const pass = prompt("配信者が設定したパスワードを入力してください");
+            if (!pass) return;
+
+            const targetID = BASE_ID + pass;
+            if (peer) peer.destroy();
+            
+            peer = new Peer({ debug: 1 });
+            peer.on('open', () => {
+                // パスワードが含まれたIDに対して発信
+                const call = peer.call(targetID, new MediaStream()); // 空のストリームで発信
                 call.on('stream', stream => {
                     const video = document.getElementById('videoView');
                     video.srcObject = stream;
                     video.onloadedmetadata = () => updateLayout();
                 });
+                
+                // IDが存在しない（パスワード間違い）などのエラー処理
+                peer.on('error', err => {
+                    if(err.type === 'peer-not-found') alert("パスワードが違うか、配信が開始されていません");
+                });
             });
         }
 
-        async function startCamera() {
-            const constraints = {
-                video: { width: { ideal: 3840 }, height: { ideal: 2160 }, facingMode: "environment", frameRate: { max: 15 } },
-                audio: false
-            };
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia(constraints);
-                const video = document.getElementById('videoView');
-                video.srcObject = stream;
-                const call = peer.call(MONITOR_ID, stream);
-                // 高ビットレート強制設定
-                const pc = call.peerConnection;
-                pc.oniceconnectionstatechange = async () => {
-                    if (pc.iceConnectionState === 'connected') {
-                        const sender = pc.getSenders().find(s => s.track.kind === 'video');
+        // 高画質設定用の共通関数
+        function setupHighBitrate(call) {
+            const pc = call.peerConnection;
+            pc.oniceconnectionstatechange = async () => {
+                if (pc.iceConnectionState === 'connected') {
+                    const senders = pc.getSenders();
+                    const sender = senders.find(s => s.track && s.track.kind === 'video');
+                    if (sender) {
                         const params = sender.getParameters();
                         if (!params.encodings) params.encodings = [{}];
                         params.encodings[0].maxBitrate = 20000000;
                         params.encodings[0].scaleResolutionDownBy = 1.0;
                         await sender.setParameters(params);
                     }
-                };
-                video.onloadedmetadata = () => updateLayout();
-            } catch (err) { alert(err); }
+                }
+            };
         }
 
+        // ③ 回転ロジック
         function toggleRotate() {
             rotation = (rotation + 90) % 360;
             updateLayout();
@@ -131,24 +119,14 @@
         function updateLayout() {
             const video = document.getElementById('videoView');
             const container = document.getElementById('container');
-            const vW = video.videoWidth;
-            const vH = video.videoHeight;
-            const cW = container.clientWidth;
-            const cH = container.clientHeight;
-
+            const vW = video.videoWidth; const vH = video.videoHeight;
+            const cW = container.clientWidth; const cH = container.clientHeight;
             if (!vW || !vH) return;
 
-            let scale = 1;
+            let scale = (rotation === 0 || rotation === 180) 
+                        ? Math.min(cW / vW, cH / vH) 
+                        : Math.min(cW / vH, cH / vW);
 
-            if (rotation === 0 || rotation === 180) {
-                // 通常時：コンテナに収まる最大倍率
-                scale = Math.min(cW / vW, cH / vH);
-            } else {
-                // 90/270度回転時：縦横が入れ替わるので、入れ替えたサイズで最大倍率を計算
-                scale = Math.min(cW / vH, cH / vW);
-            }
-
-            // videoタグ自体のサイズを映像本来の解像度に設定し、CSSのscaleでコンテナにフィットさせる
             video.style.width = vW + "px";
             video.style.height = vH + "px";
             video.style.transform = `rotate(${rotation}deg) scale(${scale})`;
